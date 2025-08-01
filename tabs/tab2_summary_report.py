@@ -1,84 +1,120 @@
 import streamlit as st
 import pandas as pd
-import datetime
 import yfinance as yf
+from datetime import datetime
+import io
 
-def load_nse_bhavcopy_data():
-    today = datetime.date.today()
-    filename = f"cm{today.strftime('%d%b%Y').upper()}bhav.csv"
-    url = f"https://www1.nseindia.com/content/historical/EQUITIES/{today.strftime('%Y')}/{today.strftime('%b').upper()}/{filename}.zip"
+@st.cache_data
+def load_default_stock_list():
+    return [
+        'ASIANPAINT.NS', 'AXISBANK.NS', 'BAJAJ-AUTO.NS', 'BAJFINANCE.NS', 'BHARTIARTL.NS',
+        'CIPLA.NS', 'COALINDIA.NS', 'DIVISLAB.NS', 'DRREDDY.NS', 'EICHERMOT.NS', 'GRASIM.NS',
+        'HCLTECH.NS', 'HDFCBANK.NS', 'HINDALCO.NS', 'HINDUNILVR.NS', 'ICICIBANK.NS', 'INFY.NS',
+        'ITC.NS', 'JSWSTEEL.NS', 'KOTAKBANK.NS', 'LT.NS', 'M&M.NS', 'MARUTI.NS', 'NESTLEIND.NS',
+        'NTPC.NS', 'ONGC.NS', 'POWERGRID.NS', 'RELIANCE.NS', 'SBIN.NS', 'SUNPHARMA.NS',
+        'TATAMOTORS.NS', 'TATASTEEL.NS', 'TCS.NS', 'TECHM.NS', 'TITAN.NS', 'ULTRACEMCO.NS',
+        'WIPRO.NS', 'INDIANB.NS', 'YESBANK.NS', 'BANKBARODA.NS', 'CANBK.NS', 'UNIONBANK.NS',
+        'PNB.NS', 'FEDERALBNK.NS'
+    ]
+
+def fetch_yfinance_data(symbols):
     try:
-        df = pd.read_csv(url, compression='zip')
-        df = df[df['SERIES'] == 'EQ']
-        df = df[['SYMBOL', 'OPEN', 'HIGH', 'LOW', 'CLOSE', 'PREVCLOSE', 'TOTTRDQTY', 'TOTTRDVAL']]
-        df["PERCENT_CHANGE"] = ((df["CLOSE"] - df["PREVCLOSE"]) / df["PREVCLOSE"]) * 100
-        return df
-    except:
-        return None
+        data = yf.download(tickers=" ".join(symbols), period="2d", interval="1d", group_by='ticker', progress=False)
+        records = []
+        for symbol in symbols:
+            if symbol in data:
+                df = data[symbol].copy()
+                if len(df) >= 2:
+                    prev_close = df.iloc[-2]['Close']
+                    today_close = df.iloc[-1]['Close']
+                    change_pct = ((today_close - prev_close) / prev_close) * 100
+                    records.append({
+                        'Symbol': symbol.replace('.NS', ''),
+                        'Previous Close': round(prev_close, 2),
+                        'Close': round(today_close, 2),
+                        'Change %': round(change_pct, 2),
+                        'Volume': int(df.iloc[-1]['Volume'])
+                    })
+        return pd.DataFrame(records).sort_values(by='Change %', ascending=False)
+    except Exception as e:
+        st.error(f"Error fetching live data: {e}")
+        return pd.DataFrame()
 
-def load_from_yfinance():
-    try:
-        nifty_stocks = ['RELIANCE.NS', 'TCS.NS', 'INFY.NS', 'HDFCBANK.NS']  # Example: you can expand this list
-        data = []
-        for ticker in nifty_stocks:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="2d")
-            if len(hist) >= 2:
-                prev, last = hist.iloc[-2], hist.iloc[-1]
-                percent_change = ((last["Close"] - prev["Close"]) / prev["Close"]) * 100
-                data.append({
-                    "SYMBOL": ticker.replace('.NS', ''),
-                    "OPEN": last["Open"],
-                    "HIGH": last["High"],
-                    "LOW": last["Low"],
-                    "CLOSE": last["Close"],
-                    "PREVCLOSE": prev["Close"],
-                    "PERCENT_CHANGE": percent_change
-                })
-        return pd.DataFrame(data)
-    except:
-        return None
+def calculate_rsi(prices, period=14):
+    delta = prices.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
 
-def process_uploaded_csv(uploaded_file):
-    try:
-        df = pd.read_csv(uploaded_file)
-        if "PERCENT_CHANGE" not in df.columns and "PREVCLOSE" in df.columns and "CLOSE" in df.columns:
-            df["PERCENT_CHANGE"] = ((df["CLOSE"] - df["PREVCLOSE"]) / df["PREVCLOSE"]) * 100
-        return df
-    except:
-        return None
+    avg_gain = gain.rolling(window=period).mean()
+    avg_loss = loss.rolling(window=period).mean()
 
-def show_summary_report():
-    st.title("📅 Daily Summary Report (Post-Market)")
-    
-    df = load_nse_bhavcopy_data()
-    
-    if df is None:
-        st.warning("⚠️ NSE Bhavcopy failed. Trying fallback (yfinance)...")
-        df = load_from_yfinance()
-    
-    if df is None:
-        st.warning("⚠️ yFinance also failed. You can upload a CSV file instead.")
-        uploaded_file = st.file_uploader("📁 Upload your Bhavcopy CSV file", type=['csv'])
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def tab2_summary_report():
+    st.header("📋 Daily Summary Report")
+
+    # Step 1: Choose source
+    use_uploaded = st.toggle("📂 Upload Full NSE Equity List (optional)")
+    default_symbols = load_default_stock_list()
+    stock_df = pd.DataFrame(default_symbols, columns=['Symbol'])
+
+    if use_uploaded:
+        uploaded_file = st.file_uploader("Upload your CSV (must contain 'Symbol' column)", type=["csv"])
         if uploaded_file:
-            df = process_uploaded_csv(uploaded_file)
-    
-    if df is None:
-        st.error("❌ No valid data found.")
+            try:
+                df = pd.read_csv(uploaded_file)
+                if 'Symbol' in df.columns:
+                    stock_df = df[['Symbol']].dropna()
+                else:
+                    st.warning("Uploaded CSV must have a 'Symbol' column.")
+            except Exception as e:
+                st.error(f"Error reading CSV: {e}")
+
+    symbols = [s if s.endswith('.NS') else f"{s}.NS" for s in stock_df['Symbol'].tolist()]
+
+    # Step 2: Fetch data
+    st.info("📡 Fetching live data from Yahoo Finance...")
+    summary_df = fetch_yfinance_data(symbols)
+
+    if summary_df.empty:
+        st.warning("⚠️ No data available.")
         return
 
-    tab1, tab2, tab3 = st.tabs(["🔼 Top 100 Gainers", "🔽 Top 100 Losers", "📊 All Stocks"])
+    # Add RSI
+    rsi_data = []
+    for symbol in symbols:
+        try:
+            df = yf.download(symbol, period="30d", interval="1d", progress=False)
+            if not df.empty:
+                rsi_val = calculate_rsi(df['Close']).iloc[-1]
+                rsi_data.append({'Symbol': symbol.replace('.NS', ''), 'RSI': round(rsi_val, 2)})
+        except:
+            rsi_data.append({'Symbol': symbol.replace('.NS', ''), 'RSI': None})
 
-    with tab1:
-        top_gainers = df.sort_values("PERCENT_CHANGE", ascending=False).head(100)
-        st.subheader("🔼 Top 100 Gainers")
-        st.dataframe(top_gainers.reset_index(drop=True), use_container_width=True)
+    rsi_df = pd.DataFrame(rsi_data)
+    summary_df = pd.merge(summary_df, rsi_df, on='Symbol', how='left')
 
-    with tab2:
-        top_losers = df.sort_values("PERCENT_CHANGE", ascending=True).head(100)
-        st.subheader("🔽 Top 100 Losers")
-        st.dataframe(top_losers.reset_index(drop=True), use_container_width=True)
+    # Tabs
+    tabs = st.tabs(["📈 Gainers", "📉 Losers", "🔼 Most Active", "📊 RSI Signals", "⬆️ Breakout Watch"])
 
-    with tab3:
-        st.subheader("📊 All Stocks (Sortable/Searchable)")
-        st.dataframe(df.sort_values("SYMBOL").reset_index(drop=True), use_container_width=True)
+    with tabs[0]:
+        st.subheader("Top 50 Gainers")
+        st.dataframe(summary_df.sort_values(by="Change %", ascending=False).head(50))
+
+    with tabs[1]:
+        st.subheader("Top 50 Losers")
+        st.dataframe(summary_df.sort_values(by="Change %", ascending=True).head(50))
+
+    with tabs[2]:
+        st.subheader("Top 50 by Volume")
+        st.dataframe(summary_df.sort_values(by="Volume", ascending=False).head(50))
+
+    with tabs[3]:
+        st.subheader("Stocks with RSI < 30 (Possible Oversold)")
+        st.dataframe(summary_df[summary_df['RSI'] < 30].sort_values(by="RSI").head(50))
+
+    with tabs[4]:
+        st.subheader("Breakout Watch (RSI > 70 & Gaining)")
+        st.dataframe(summary_df[(summary_df['RSI'] > 70) & (summary_df['Change %'] > 0)].sort_values(by="Change %", ascending=False).head(50))
