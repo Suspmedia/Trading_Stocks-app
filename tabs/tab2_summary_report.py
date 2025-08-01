@@ -2,102 +2,103 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import datetime
+import io
 
-@st.cache_data
-def load_default_watchlist():
+@st.cache_data(ttl=3600)
+def get_nifty500_list():
     return [
-        'RELIANCE.NS', 'TCS.NS', 'INFY.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'KOTAKBANK.NS',
-        'SBIN.NS', 'AXISBANK.NS', 'LT.NS', 'HINDUNILVR.NS', 'ITC.NS', 'BAJFINANCE.NS',
-        'ASIANPAINT.NS', 'MARUTI.NS', 'WIPRO.NS', 'SUNPHARMA.NS', 'TITAN.NS', 'ULTRACEMCO.NS',
-        'TECHM.NS', 'POWERGRID.NS', 'NESTLEIND.NS', 'HCLTECH.NS', 'NTPC.NS', 'COALINDIA.NS',
-        'GRASIM.NS', 'BPCL.NS', 'ONGC.NS', 'ADANIENT.NS', 'ADANIPORTS.NS', 'BHARTIARTL.NS'
+        'RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'ICICIBANK.NS', 'HINDUNILVR.NS', 'SBIN.NS',
+        'AXISBANK.NS', 'BAJFINANCE.NS', 'ITC.NS', 'KOTAKBANK.NS', 'LT.NS', 'ASIANPAINT.NS',
+        'SUNPHARMA.NS', 'MARUTI.NS', 'NTPC.NS', 'ULTRACEMCO.NS', 'TITAN.NS', 'HCLTECH.NS',
+        'TECHM.NS', 'POWERGRID.NS', 'ONGC.NS', 'TATASTEEL.NS', 'JSWSTEEL.NS', 'WIPRO.NS',
+        'COALINDIA.NS', 'NESTLEIND.NS', 'HDFCLIFE.NS', 'BPCL.NS', 'ADANIENT.NS', 'EICHERMOT.NS',
+        'DRREDDY.NS', 'DIVISLAB.NS', 'CIPLA.NS', 'BHARTIARTL.NS', 'GRASIM.NS', 'BRITANNIA.NS',
+        'BAJAJ-AUTO.NS', 'HINDALCO.NS', 'UPL.NS', 'SHREECEM.NS', 'TATACONSUM.NS', 'M&M.NS'
     ]
 
-@st.cache_data
-def fetch_stock_data(symbols):
-    end = datetime.datetime.today()
-    start = end - datetime.timedelta(days=7)
-    data = {}
+@st.cache_data(ttl=3600)
+def fetch_data(symbols, period="1d", interval="1d"):
+    df_list = []
     for symbol in symbols:
         try:
-            df = yf.download(symbol, start=start, end=end)
-            df['Symbol'] = symbol
-            data[symbol] = df
-        except:
+            data = yf.download(symbol, period=period, interval=interval, progress=False)
+            if not data.empty:
+                latest = data.iloc[-1]
+                prev_close = data.iloc[-2]["Close"] if len(data) > 1 else latest["Open"]
+                pct_change = ((latest["Close"] - prev_close) / prev_close) * 100
+                df_list.append({
+                    "Symbol": symbol,
+                    "Open": latest["Open"],
+                    "High": latest["High"],
+                    "Low": latest["Low"],
+                    "Close": latest["Close"],
+                    "Volume": latest["Volume"],
+                    "% Change": round(pct_change, 2)
+                })
+        except Exception as e:
             continue
-    return data
+    return pd.DataFrame(df_list)
 
-def calculate_summary(data_dict):
-    summary = []
-    for symbol, df in data_dict.items():
-        if len(df) < 2:
-            continue
-        latest = df.iloc[-1]
-        prev = df.iloc[-2]
-        change_pct = ((latest['Close'] - prev['Close']) / prev['Close']) * 100
-        volume = latest['Volume']
-        rsi = calculate_rsi(df['Close'])[-1]
-        summary.append({
-            'Symbol': symbol.replace('.NS', ''),
-            'Price': round(latest['Close'], 2),
-            'Change %': round(change_pct, 2),
-            'Volume': volume,
-            'RSI': round(rsi, 2)
-        })
-    df_summary = pd.DataFrame(summary)
-    return df_summary
+def show():
+    st.header("📅 Daily Summary Report")
 
-def calculate_rsi(series, period=14):
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -1 * delta.clip(upper=0)
-    avg_gain = gain.rolling(window=period).mean()
-    avg_loss = loss.rolling(window=period).mean()
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    mode = st.radio("Data Source", ["Preloaded NIFTY 500", "Upload Full NSE List (CSV)"])
 
-def show()
-    st.header("📅 Daily Market Summary Report")
-
-    default_watchlist = load_default_watchlist()
-
-    uploaded_file = st.file_uploader("📥 Upload NSE full stock list CSV (optional)", type=["csv"])
-    if uploaded_file:
-        try:
-            df_uploaded = pd.read_csv(uploaded_file)
-            symbols = df_uploaded['Symbol'].apply(lambda x: x + ".NS").tolist()
-            st.success(f"Loaded {len(symbols)} stocks from uploaded file.")
-        except:
-            st.error("❌ Error parsing uploaded CSV. Make sure it has a 'Symbol' column.")
+    if mode == "Upload Full NSE List (CSV)":
+        uploaded_file = st.file_uploader("Upload NSE CSV (with Symbol column)", type=["csv"])
+        if uploaded_file:
+            df_csv = pd.read_csv(uploaded_file)
+            if 'Symbol' in df_csv.columns:
+                symbols = [s.strip().upper() for s in df_csv['Symbol'].tolist()]
+                symbols = [s if s.endswith('.NS') else s + ".NS" for s in symbols]
+            else:
+                st.error("Uploaded CSV must have a 'Symbol' column.")
+                return
+        else:
+            st.warning("Please upload a CSV file to proceed.")
             return
     else:
-        symbols = default_watchlist
-        st.info("Using preloaded NIFTY 500 stock list (faster).")
+        symbols = get_nifty500_list()
 
-    stock_data = fetch_stock_data(symbols)
-    if not stock_data:
-        st.warning("⚠️ No stock data fetched. Check internet connection or stock list.")
+    with st.spinner("Fetching stock data..."):
+        data = fetch_data(symbols)
+
+    if data.empty:
+        st.error("No stock data fetched. Please check your symbols or try again.")
         return
 
-    summary_df = calculate_summary(stock_data)
+    gainers = data.sort_values(by="% Change", ascending=False).head(50).reset_index(drop=True)
+    losers = data.sort_values(by="% Change", ascending=True).head(50).reset_index(drop=True)
+    volume_leaders = data.sort_values(by="Volume", ascending=False).head(50).reset_index(drop=True)
+    overbought = data[data["% Change"] > 5].sort_values(by="% Change", ascending=False)
+    oversold = data[data["% Change"] < -5].sort_values(by="% Change")
 
-    # Multiple tabs for better categorization
-    tabs = st.tabs(["🔼 Top 50 Gainers", "🔽 Top 50 Losers", "📊 Top 50 Volume", "📈 Top 50 RSI"])
+    st.markdown("### 📊 Top 50 Gainers & Losers")
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 Gainers", "📉 Losers", "🔊 Volume", "📈 Overbought", "📉 Oversold"])
 
-    with tabs[0]:
-        st.subheader("🔼 Top 50 Gainers")
-        st.dataframe(summary_df.sort_values(by="Change %", ascending=False).head(50), use_container_width=True)
+    with tab1:
+        st.dataframe(gainers, use_container_width=True)
 
-    with tabs[1]:
-        st.subheader("🔽 Top 50 Losers")
-        st.dataframe(summary_df.sort_values(by="Change %").head(50), use_container_width=True)
+    with tab2:
+        st.dataframe(losers, use_container_width=True)
 
-    with tabs[2]:
-        st.subheader("📊 Top 50 by Volume")
-        st.dataframe(summary_df.sort_values(by="Volume", ascending=False).head(50), use_container_width=True)
+    with tab3:
+        st.dataframe(volume_leaders, use_container_width=True)
 
-    with tabs[3]:
-        st.subheader("📈 Top 50 by RSI")
-        st.dataframe(summary_df.sort_values(by="RSI", ascending=False).head(50), use_container_width=True)
+    with tab4:
+        st.dataframe(overbought, use_container_width=True)
 
+    with tab5:
+        st.dataframe(oversold, use_container_width=True)
+
+    # Export
+    st.markdown("### 📁 Download Summary")
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+        gainers.to_excel(writer, index=False, sheet_name='Top Gainers')
+        losers.to_excel(writer, index=False, sheet_name='Top Losers')
+        volume_leaders.to_excel(writer, index=False, sheet_name='Top Volume')
+        overbought.to_excel(writer, index=False, sheet_name='Overbought')
+        oversold.to_excel(writer, index=False, sheet_name='Oversold')
+        writer.save()
+    st.download_button("📥 Download Excel Report", data=buffer.getvalue(), file_name="daily_summary_report.xlsx", mime="application/vnd.ms-excel")
