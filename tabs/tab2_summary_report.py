@@ -1,85 +1,114 @@
-# tab2_summary_report.py
-
 import streamlit as st
-import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
+import pandas as pd
+from datetime import datetime
+import time
 
-@st.cache_data(ttl=3600)
+@st.cache_data(show_spinner=False)
+def get_nifty500_symbols():
+    return pd.read_csv("https://archives.nseindia.com/content/indices/ind_nifty500list.csv")["Symbol"].apply(lambda x: x + ".NS").tolist()
+
+@st.cache_data(show_spinner=True)
 def fetch_data(symbols):
-    all_data = []
+    tickers = yf.Tickers(" ".join(symbols))
+    data = []
     for symbol in symbols:
         try:
-            df = yf.download(symbol + ".NS", period="2d", interval="1d", progress=False)
-            if len(df) < 2:
+            ticker = tickers.tickers[symbol]
+            hist = ticker.history(period="2d", interval="1d")
+            if len(hist) < 2:
                 continue
-            close_today = df["Close"].iloc[-1]
-            close_yesterday = df["Close"].iloc[-2]
-            pct_change = ((close_today - close_yesterday) / close_yesterday) * 100
-            volume = df["Volume"].iloc[-1]
-            all_data.append({
-                "Symbol": symbol,
-                "Close": close_today,
-                "% Change": round(pct_change, 2),
-                "Volume": volume,
+            prev_close = hist['Close'].iloc[0]
+            latest = hist.iloc[-1]
+            pct_change = ((latest['Close'] - prev_close) / prev_close) * 100
+            info = ticker.info
+            pe = info.get("trailingPE", None)
+            hist_month = ticker.history(period="1mo")
+            sma20 = hist_month['Close'].rolling(20).mean().iloc[-1] if len(hist_month) >= 20 else None
+            delta = hist_month['Close'].diff()
+            gain = delta.where(delta > 0, 0)
+            loss = -delta.where(delta < 0, 0)
+            avg_gain = gain.rolling(14).mean().iloc[-1]
+            avg_loss = loss.rolling(14).mean().iloc[-1]
+            rs = avg_gain / avg_loss if avg_loss != 0 else 0
+            rsi = 100 - (100 / (1 + rs))
+
+            data.append({
+                "Symbol": symbol.replace(".NS", ""),
+                "Close": latest['Close'],
+                "% Change": pct_change,
+                "Volume": latest['Volume'],
+                "P/E Ratio": pe,
+                "SMA 20": sma20,
+                "RSI": rsi
             })
-        except Exception as e:
-            print(f"Error fetching {symbol}: {e}")
-    return pd.DataFrame(all_data)
+        except Exception:
+            continue
+    return pd.DataFrame(data)
 
 def show():
-    st.subheader("📅 Daily Summary Report")
+    st.header("📅 Daily Summary Report")
 
-    # Choose stock universe
-    mode = st.radio("Select Mode", ["NIFTY 500", "Manual CSV Upload (Full NSE)"])
+    st.markdown("### 🔍 Choose Data Source")
+    use_custom = st.checkbox("Upload your own stock list (CSV)", value=False)
 
-    if mode == "NIFTY 500":
-        nifty_500 = pd.read_csv("https://archives.nseindia.com/content/indices/ind_nifty500list.csv")
-        symbols = nifty_500["Symbol"].unique().tolist()
-    else:
-        uploaded_file = st.file_uploader("Upload NSE Stock List CSV", type=["csv"])
-        if uploaded_file is not None:
-            try:
-                user_df = pd.read_csv(uploaded_file)
-                symbols = user_df["Symbol"].unique().tolist()
-            except Exception as e:
-                st.error(f"Failed to read uploaded CSV: {e}")
-                return
+    if use_custom:
+        uploaded = st.file_uploader("Upload CSV with column 'Symbol'", type=["csv"])
+        if uploaded:
+            user_df = pd.read_csv(uploaded)
+            symbols = user_df['Symbol'].dropna().tolist()
+            symbols = [s if s.endswith(".NS") else s + ".NS" for s in symbols]
         else:
-            st.warning("Please upload a CSV file.")
+            st.warning("Please upload a valid CSV file.")
             return
+    else:
+        symbols = get_nifty500_symbols()
 
-    if not symbols:
-        st.warning("No symbols available.")
+    st.markdown("### 📥 Fetching Data...")
+    data = fetch_data(symbols)
+    if data.empty:
+        st.error("❌ No data fetched.")
         return
 
-    with st.spinner("Fetching live data..."):
-        data = fetch_data(symbols)
+    st.markdown("### 📊 Summary Filters")
 
-    if data.empty or not set(["% Change", "Close", "Volume"]).issubset(data.columns):
-        st.error("Data fetch failed or missing required columns.")
-        return
+    # Add filters
+    min_rsi, max_rsi = st.slider("RSI Range", 0, 100, (30, 70))
+    min_pe, max_pe = st.slider("P/E Ratio Range", 0.0, 100.0, (0.0, 60.0))
 
-    data = data.dropna(subset=["% Change", "Close", "Volume"])  # Clean rows with missing values
+    filtered = data[
+        (data["RSI"].between(min_rsi, max_rsi)) &
+        (data["P/E Ratio"].between(min_pe, max_pe, inclusive="both"))
+    ]
 
-    # Sorting tabs
-    tabs = st.tabs(["🔼 Top 50 Gainers", "🔽 Top 50 Losers", "📊 Top by Volume", "📈 RSI Candidates"])
+    # Tabs
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 Gainers", "📉 Losers", "🔥 Volume Leaders", "📘 Fundamentals"])
 
-    with tabs[0]:
-        gainers = data.sort_values(by="% Change", ascending=False).head(50).reset_index(drop=True)
+    with tab1:
+        st.subheader("Top 50 Gainers")
+        gainers = filtered.sort_values(by="% Change", ascending=False).head(50).reset_index(drop=True)
         st.dataframe(gainers)
-
-    with tabs[1]:
-        losers = data.sort_values(by="% Change", ascending=True).head(50).reset_index(drop=True)
+    
+    with tab2:
+        st.subheader("Top 50 Losers")
+        losers = filtered.sort_values(by="% Change", ascending=True).head(50).reset_index(drop=True)
         st.dataframe(losers)
 
-    with tabs[2]:
-        top_vol = data.sort_values(by="Volume", ascending=False).head(50).reset_index(drop=True)
-        st.dataframe(top_vol)
+    with tab3:
+        st.subheader("Top 50 Volume Leaders")
+        volume = filtered.sort_values(by="Volume", ascending=False).head(50).reset_index(drop=True)
+        st.dataframe(volume)
 
-    with tabs[3]:
-        # Simulated RSI candidates (mock logic for now)
-        rsi_candidates = data[
-            (data["% Change"] < -2) & (data["Volume"] > data["Volume"].median())
-        ].sort_values(by="% Change").head(50).reset_index(drop=True)
-        st.dataframe(rsi_candidates)
+    with tab4:
+        st.subheader("Fundamental Overview (P/E, RSI, SMA)")
+        st.dataframe(filtered.sort_values(by="P/E Ratio", na_position="last").reset_index(drop=True))
+
+    # Excel Export
+    st.markdown("### 📤 Export Summary to Excel")
+    @st.cache_data
+    def convert_df(df):
+        return df.to_excel(index=False, engine='openpyxl')
+
+    excel = convert_df(filtered)
+    st.download_button("📥 Download Excel", data=excel, file_name="summary_report.xlsx")
+
