@@ -12,3 +12,4 @@ requests
 py_vollib
 beautifulsoup4
 altair
+openpyxl
