@@ -11,8 +11,8 @@ from tabs import (
     tab1_india_stocks,
     tab2_summary_report,
     tab3_historical_forecast,
-    tab4_option_analyzer,
-    tab5_signal_generator,
+    tab4_option_analysis,
+    tab5_signal_generation,
     tab6_global_markets,
     tab7_advanced_metrics,
 )
