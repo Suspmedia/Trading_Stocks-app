@@ -31,7 +31,7 @@ def show():
     with col1:
         selected_letter = st.selectbox("Filter by alphabet", ['All'] + list(string.ascii_uppercase))
 
-    # Filter stocks by selected letter
+    # Filter stocks
     if selected_letter == 'All':
         filtered_stocks = all_stocks
     else:
@@ -53,33 +53,40 @@ def show():
 
         st.subheader(f"{selected_stock_name} ({selected_symbol})")
 
-        # Show raw data
+        # Raw data
         with st.expander("📄 View Raw OHLC Data"):
             st.dataframe(data.tail(50))
 
-        # Prepare for Altair
+        # Prepare data
         df = data.reset_index()
         df['Date'] = pd.to_datetime(df['Date'])
 
+        # Calculate SMAs
+        df['SMA_5'] = df['Close'].rolling(window=5).mean()
+        df['SMA_14'] = df['Close'].rolling(window=14).mean()
+        df['SMA_21'] = df['Close'].rolling(window=21).mean()
+
         base = alt.Chart(df).encode(x='Date:T')
 
-        # Candlestick using bar for body and rule for high/low
         rule = base.mark_rule().encode(
             y='Low:Q',
             y2='High:Q'
         )
 
-        bar = base.mark_bar().encode(
+        candle = base.mark_bar().encode(
             y='Open:Q',
             y2='Close:Q',
-            color=alt.condition("datum.Open <= datum.Close",
-                                alt.value("green"), alt.value("red"))
+            color=alt.condition("datum.Open <= datum.Close", alt.value("green"), alt.value("red"))
         )
 
-        chart = (rule + bar).properties(
+        sma5 = base.mark_line(color='yellow', strokeDash=[3,3]).encode(y='SMA_5:Q').properties(title='5-Day SMA')
+        sma14 = base.mark_line(color='orange').encode(y='SMA_14:Q').properties(title='14-Day SMA')
+        sma21 = base.mark_line(color='cyan').encode(y='SMA_21:Q').properties(title='21-Day SMA')
+
+        chart = (rule + candle + sma5 + sma14 + sma21).properties(
             width=900,
-            height=400,
-            title=f"{selected_stock_name} OHLC Chart (Altair)"
+            height=450,
+            title=f"{selected_stock_name} OHLC + Moving Averages"
         )
 
         st.altair_chart(chart, use_container_width=True)
