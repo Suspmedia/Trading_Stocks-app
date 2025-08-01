@@ -28,12 +28,16 @@ tabs = {
     "⚙️ Advanced Indicators": tab7_advanced_metrics,
 }
 
+# Sidebar
 st.sidebar.title("📊 Stock Market Analyzer")
 selected_tab = st.sidebar.radio("Go to", list(tabs.keys()))
 
-# Show selected tab
+# App Header
 st.title("📊 Indian Stock Market Analyzer")
 st.markdown("Welcome to the all-in-one Indian Stock Market data analysis app!")
 
-# Call the corresponding function
-tabs[selected_tab].show()
+# Show selected tab
+try:
+    tabs[selected_tab].show()
+except AttributeError:
+    st.error("⚠️ This tab is not implemented yet. Please ensure it defines a `show()` function.")
