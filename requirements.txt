@@ -1,0 +1,12 @@
+streamlit
+yfinance
+nsepython
+pandas
+numpy
+plotly
+matplotlib
+scikit-learn
+prophet
+bs4
+requests
+py_vollib
