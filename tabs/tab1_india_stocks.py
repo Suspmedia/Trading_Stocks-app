@@ -9,8 +9,8 @@ from datetime import datetime, timedelta
 def show():
     st.header("📈 Indian Stock Analyzer")
 
-    # Predefined F&O stock list with key additions
-    predefined_stocks = sorted([
+    # Your exact custom stock list
+    stock_dict = {
         'ASIANPAINT': 'ASIANPAINT.NS', 'AXISBANK': 'AXISBANK.NS', 'BAJAJ-AUTO': 'BAJAJ-AUTO.NS',
         'BAJFINANCE': 'BAJFINANCE.NS', 'BHARTIARTL': 'BHARTIARTL.NS', 'CIPLA': 'CIPLA.NS',
         'COALINDIA': 'COALINDIA.NS', 'DIVISLAB': 'DIVISLAB.NS', 'DRREDDY': 'DRREDDY.NS',
@@ -24,19 +24,19 @@ def show():
         'TECHM': 'TECHM.NS', 'TITAN': 'TITAN.NS', 'ULTRACEMCO': 'ULTRACEMCO.NS', 'WIPRO': 'WIPRO.NS',
         'INDIANB': 'INDIANB.NS', 'YESBANK': 'YESBANK.NS', 'BANKBARODA': 'BANKBARODA.NS',
         'CANBK': 'CANBK.NS', 'UNIONBANK': 'UNIONBANK.NS', 'PNB': 'PNB.NS', 'FEDERALBNK': 'FEDERALBNK.NS',
-    ])
+    }
 
-    selected_stock = st.selectbox("🔍 Select a stock", predefined_stocks)
+    stock_names = list(stock_dict.keys())
+    selected_name = st.selectbox("🔍 Select a stock", stock_names)
+    selected_stock = stock_dict[selected_name]
 
     # Timeframe selector
     timeframe = st.selectbox("🕒 Select timeframe", ["5 days", "14 days", "21 days"])
-    days_map = {"5 days": 5, "14 days": 14, "21 days": 21}
-    num_days = days_map[timeframe]
+    num_days = {"5 days": 5, "14 days": 14, "21 days": 21}[timeframe]
 
     end_date = datetime.today()
     start_date = end_date - timedelta(days=num_days * 2)
 
-    # Load stock data
     try:
         df = yf.download(selected_stock, start=start_date, end=end_date, progress=False)
         df.reset_index(inplace=True)
@@ -45,10 +45,10 @@ def show():
         df = df.tail(num_days)
         source = df.copy()
     except Exception as e:
-        st.warning("⚠️ Failed to fetch stock data.")
+        st.warning(f"⚠️ Failed to fetch data for {selected_stock}")
         return
 
-    st.subheader(f"{selected_stock.replace('.NS','')} OHLC Chart (Altair)")
+    st.subheader(f"{selected_name} ({selected_stock}) OHLC Chart")
 
     base = alt.Chart(source).encode(x='Date:T')
 
@@ -59,7 +59,7 @@ def show():
     )
 
     bar = base.mark_bar().encode(
-        y=alt.Y('Open:Q', title="Price"),
+        y='Open:Q',
         y2='Close:Q',
         color=alt.condition("datum.Open <= datum.Close", alt.value("green"), alt.value("red"))
     )
@@ -67,7 +67,5 @@ def show():
     ohlc_chart = (rule + bar).properties(width=800, height=400)
     st.altair_chart(ohlc_chart, use_container_width=True)
 
-    # Show Data Table
     with st.expander("📋 View OHLC Data"):
         st.dataframe(df.set_index("Date"))
-
