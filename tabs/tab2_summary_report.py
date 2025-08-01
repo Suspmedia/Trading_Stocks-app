@@ -25,7 +25,7 @@ def fetch_data(symbols, period="1d", interval="1d"):
             if not data.empty:
                 latest = data.iloc[-1]
                 prev_close = data.iloc[-2]["Close"] if len(data) > 1 else latest["Open"]
-                pct_change = ((latest["Close"] - prev_close) / prev_close) * 100
+                pct_change = ((latest["Close"] - prev_close) / prev_close) * 100 if prev_close else 0
                 df_list.append({
                     "Symbol": symbol,
                     "Open": latest["Open"],
@@ -35,9 +35,12 @@ def fetch_data(symbols, period="1d", interval="1d"):
                     "Volume": latest["Volume"],
                     "% Change": round(pct_change, 2)
                 })
-        except Exception as e:
+        except Exception:
             continue
-    return pd.DataFrame(df_list)
+    df = pd.DataFrame(df_list)
+    df = df.dropna(subset=["% Change", "Close", "Volume"])  # Clean rows with missing values
+    df = df[pd.to_numeric(df["% Change"], errors="coerce").notnull()]  # Keep numeric only
+    return df
 
 def show():
     st.header("📅 Daily Summary Report")
@@ -67,11 +70,15 @@ def show():
         st.error("No stock data fetched. Please check your symbols or try again.")
         return
 
-    gainers = data.sort_values(by="% Change", ascending=False).head(50).reset_index(drop=True)
-    losers = data.sort_values(by="% Change", ascending=True).head(50).reset_index(drop=True)
-    volume_leaders = data.sort_values(by="Volume", ascending=False).head(50).reset_index(drop=True)
-    overbought = data[data["% Change"] > 5].sort_values(by="% Change", ascending=False)
-    oversold = data[data["% Change"] < -5].sort_values(by="% Change")
+    try:
+        gainers = data.sort_values(by="% Change", ascending=False).head(50).reset_index(drop=True)
+        losers = data.sort_values(by="% Change", ascending=True).head(50).reset_index(drop=True)
+        volume_leaders = data.sort_values(by="Volume", ascending=False).head(50).reset_index(drop=True)
+        overbought = data[data["% Change"] > 5].sort_values(by="% Change", ascending=False)
+        oversold = data[data["% Change"] < -5].sort_values(by="% Change")
+    except Exception as e:
+        st.error(f"Error in processing data: {e}")
+        return
 
     st.markdown("### 📊 Top 50 Gainers & Losers")
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 Gainers", "📉 Losers", "🔊 Volume", "📈 Overbought", "📉 Oversold"])
@@ -100,5 +107,5 @@ def show():
         volume_leaders.to_excel(writer, index=False, sheet_name='Top Volume')
         overbought.to_excel(writer, index=False, sheet_name='Overbought')
         oversold.to_excel(writer, index=False, sheet_name='Oversold')
-        writer.save()
+        writer.close()
     st.download_button("📥 Download Excel Report", data=buffer.getvalue(), file_name="daily_summary_report.xlsx", mime="application/vnd.ms-excel")
