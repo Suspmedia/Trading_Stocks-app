@@ -1,7 +1,6 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import plotly.graph_objs as go
 import altair as alt
 import string
 
@@ -14,12 +13,12 @@ def get_nse_stock_list():
         'EICHERMOT': 'EICHERMOT.NS', 'GRASIM': 'GRASIM.NS', 'HCLTECH': 'HCLTECH.NS',
         'HDFCBANK': 'HDFCBANK.NS', 'HINDALCO': 'HINDALCO.NS', 'HINDUNILVR': 'HINDUNILVR.NS',
         'ICICIBANK': 'ICICIBANK.NS', 'INDIANB': 'INDIANB.NS', 'YESBANK': 'YESBANK.NS',
-        'INFY': 'INFY.NS', 'ITC': 'ITC.NS', 'JSWSTEEL': 'JSWSTEEL.NS', 'KOTAKBANK': 'KOTAKBANK.NS',
-        'LT': 'LT.NS', 'M&M': 'M&M.NS', 'MARUTI': 'MARUTI.NS', 'NESTLEIND': 'NESTLEIND.NS',
-        'NTPC': 'NTPC.NS', 'ONGC': 'ONGC.NS', 'POWERGRID': 'POWERGRID.NS', 'RELIANCE': 'RELIANCE.NS',
-        'SBIN': 'SBIN.NS', 'SUNPHARMA': 'SUNPHARMA.NS', 'TATAMOTORS': 'TATAMOTORS.NS',
-        'TATASTEEL': 'TATASTEEL.NS', 'TCS': 'TCS.NS', 'TECHM': 'TECHM.NS', 'TITAN': 'TITAN.NS',
-        'ULTRACEMCO': 'ULTRACEMCO.NS', 'WIPRO': 'WIPRO.NS'
+        'INFY': 'INFY.NS', 'ITC': 'ITC.NS', 'JSWSTEEL': 'JSWSTEEL.NS',
+        'KOTAKBANK': 'KOTAKBANK.NS', 'LT': 'LT.NS', 'M&M': 'M&M.NS', 'MARUTI': 'MARUTI.NS',
+        'NESTLEIND': 'NESTLEIND.NS', 'NTPC': 'NTPC.NS', 'ONGC': 'ONGC.NS', 'POWERGRID': 'POWERGRID.NS',
+        'RELIANCE': 'RELIANCE.NS', 'SBIN': 'SBIN.NS', 'SUNPHARMA': 'SUNPHARMA.NS',
+        'TATAMOTORS': 'TATAMOTORS.NS', 'TATASTEEL': 'TATASTEEL.NS', 'TCS': 'TCS.NS',
+        'TECHM': 'TECHM.NS', 'TITAN': 'TITAN.NS', 'ULTRACEMCO': 'ULTRACEMCO.NS', 'WIPRO': 'WIPRO.NS'
     }
 
 def show():
@@ -27,10 +26,12 @@ def show():
 
     all_stocks = get_nse_stock_list()
 
+    # Alphabet filter
     col1, col2 = st.columns([1, 3])
     with col1:
         selected_letter = st.selectbox("Filter by alphabet", ['All'] + list(string.ascii_uppercase))
 
+    # Filter stocks by selected letter
     if selected_letter == 'All':
         filtered_stocks = all_stocks
     else:
@@ -41,8 +42,8 @@ def show():
 
     selected_symbol = filtered_stocks[selected_stock_name]
 
-    timeframe = st.selectbox("Select timeframe", ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "max"])
-    interval = st.selectbox("Select interval", ["1m", "5m", "15m", "30m", "1h", "1d", "1wk", "1mo"])
+    timeframe = st.selectbox("Select timeframe", ["1mo", "3mo", "6mo", "1y", "2y", "5y", "max"])
+    interval = st.selectbox("Select interval", ["1d", "1wk", "1mo"])
 
     try:
         data = yf.download(selected_symbol, period=timeframe, interval=interval, progress=False)
@@ -56,42 +57,32 @@ def show():
         with st.expander("📄 View Raw OHLC Data"):
             st.dataframe(data.tail(50))
 
-        # Try Plotly Candlestick
-        try:
-            fig = go.Figure()
-            fig.add_trace(go.Candlestick(
-                x=data.index,
-                open=data['Open'],
-                high=data['High'],
-                low=data['Low'],
-                close=data['Close'],
-                name="Candlesticks"
-            ))
+        # Prepare for Altair
+        df = data.reset_index()
+        df['Date'] = pd.to_datetime(df['Date'])
 
-            fig.update_layout(
-                xaxis_title="Date",
-                yaxis_title="Price (INR)",
-                title=f"{selected_stock_name} Candlestick Chart",
-                xaxis_rangeslider_visible=False,
-                template="plotly_dark"
-            )
+        base = alt.Chart(df).encode(x='Date:T')
 
-            st.plotly_chart(fig, use_container_width=True)
+        # Candlestick using bar for body and rule for high/low
+        rule = base.mark_rule().encode(
+            y='Low:Q',
+            y2='High:Q'
+        )
 
-        except Exception as e:
-            st.warning("⚠️ Candlestick chart failed. Showing line chart instead.")
-            st.caption(f"Error: {e}")
+        bar = base.mark_bar().encode(
+            y='Open:Q',
+            y2='Close:Q',
+            color=alt.condition("datum.Open <= datum.Close",
+                                alt.value("green"), alt.value("red"))
+        )
 
-            # Fallback Line Chart
-            line_chart = alt.Chart(data.reset_index()).mark_line().encode(
-                x='Date:T',
-                y='Close:Q'
-            ).properties(
-                title=f"{selected_stock_name} - Closing Price",
-                width=800,
-                height=400
-            )
-            st.altair_chart(line_chart, use_container_width=True)
+        chart = (rule + bar).properties(
+            width=900,
+            height=400,
+            title=f"{selected_stock_name} OHLC Chart (Altair)"
+        )
+
+        st.altair_chart(chart, use_container_width=True)
 
     except Exception as e:
-        st.error(f"❌ Error loading chart: {e}")
+        st.error(f"Error loading chart: {e}")
