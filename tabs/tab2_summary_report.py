@@ -7,23 +7,18 @@ from datetime import datetime
 
 @st.cache_data
 def fetch_from_nse_html():
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept-Language": "en-US,en;q=0.9"
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        url = "https://www.nseindia.com/market-data/top-gainers-loosers"
         session = requests.Session()
+        url = "https://www.nseindia.com/market-data/top-gainers-loosers"
         response = session.get(url, headers=headers, timeout=10)
-
         soup = BeautifulSoup(response.content, "html.parser")
         tables = soup.find_all("table")
 
         gainers_df = pd.read_html(str(tables[0]))[0] if tables else pd.DataFrame()
         losers_df = pd.read_html(str(tables[1]))[0] if len(tables) > 1 else pd.DataFrame()
-
         return gainers_df, losers_df
-    except Exception as e:
+    except:
         return None, None
 
 @st.cache_data
@@ -38,6 +33,19 @@ def fetch_from_nse_csv():
         return gainers_df, losers_df
     except:
         return None, None
+
+@st.cache_data
+def fetch_all_nse_stocks():
+    try:
+        url = "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%20500"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, timeout=10)
+        data = response.json()
+        records = data["data"]
+        df = pd.DataFrame(records)
+        return df
+    except:
+        return None
 
 @st.cache_data
 def fetch_from_yfinance():
@@ -55,31 +63,47 @@ def fetch_from_yfinance():
             "Change": round(change, 2),
             "Percent Change": f"{percent_change:.2f}%"
         }])
-        return df, df  # Dummy gainers/losers for example
+        return df, df
     except:
         return None, None
 
 def run():
     st.header("📅 Daily Summary Report (Post-Market)")
-    
+
     source = st.selectbox("Select Data Source", ["From NSE HTML", "From NSE CSV", "From Yahoo Finance"])
+
+    gainers, losers = None, None
+    all_stocks = None
 
     if source == "From NSE HTML":
         gainers, losers = fetch_from_nse_html()
+        all_stocks = fetch_all_nse_stocks()
     elif source == "From NSE CSV":
         gainers, losers = fetch_from_nse_csv()
+        all_stocks = fetch_all_nse_stocks()
     elif source == "From Yahoo Finance":
         gainers, losers = fetch_from_yfinance()
-    else:
-        gainers, losers = None, None
+
+    tab_titles = ["📈 Top Gainers", "📉 Top Losers"]
+    if all_stocks is not None and not all_stocks.empty:
+        tab_titles.append("📊 All Stocks (Nifty 500)")
+
+    tabs = st.tabs(tab_titles)
 
     if gainers is not None and not gainers.empty:
-        tabs = st.tabs(["Top Gainers", "Top Losers"])
         with tabs[0]:
-            st.subheader("📈 Top Gainers")
             st.dataframe(gainers, use_container_width=True)
+    else:
+        with tabs[0]:
+            st.warning("Top gainers data not available.")
+
+    if losers is not None and not losers.empty:
         with tabs[1]:
-            st.subheader("📉 Top Losers")
             st.dataframe(losers, use_container_width=True)
     else:
-        st.warning("⚠️ Failed to fetch data for selected source.")
+        with tabs[1]:
+            st.warning("Top losers data not available.")
+
+    if all_stocks is not None and not all_stocks.empty and len(tabs) > 2:
+        with tabs[2]:
+            st.dataframe(all_stocks, use_container_width=True)
