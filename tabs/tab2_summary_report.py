@@ -58,7 +58,6 @@ def calculate_rsi(series, period=14):
     return rsi
 
 def show()
-def tab2_summary_report():
     st.header("📅 Daily Market Summary Report")
 
     default_watchlist = load_default_watchlist()
