@@ -1,31 +1,39 @@
 import streamlit as st
 
-# Load tab modules from the 'tabs' folder
-from tabs.tab2_summary_report import show_summary_report
-# You can add other tabs similarly when ready
+# Page Config
+st.set_page_config(
+    page_title="📊 Indian Stock Market Analyzer",
+    layout="wide"
+)
 
-# --- App Title ---
-st.set_page_config(page_title="📈 Indian Stock Market Analyzer", layout="wide")
+# Import tab modules
+from tabs import (
+    tab1_india_stocks,
+    tab2_summary_report,
+    tab3_historical_forecast,
+    tab4_option_analyzer,
+    tab5_signal_generator,
+    tab6_global_markets,
+    tab7_advanced_metrics,
+)
+
+# Sidebar Navigation
+tabs = {
+    "📈 Indian Stocks": tab1_india_stocks,
+    "📅 Daily Summary Report": tab2_summary_report,
+    "🔍 Stock Forecast & History": tab3_historical_forecast,
+    "🧮 Option Analyzer": tab4_option_analyzer,
+    "🚦 Signal Generator": tab5_signal_generator,
+    "🌐 Global Market Report": tab6_global_markets,
+    "⚙️ Advanced Indicators": tab7_advanced_metrics,
+}
+
+st.sidebar.title("📊 Stock Market Analyzer")
+selected_tab = st.sidebar.radio("Go to", list(tabs.keys()))
+
+# Show selected tab
 st.title("📊 Indian Stock Market Analyzer")
-st.markdown("""
-Welcome to the all-in-one Indian Stock Market data analysis app!
-""")
+st.markdown("Welcome to the all-in-one Indian Stock Market data analysis app!")
 
-# --- Tab Selection ---
-tabs = [
-    "📈 Tab 1 - Stock Market Charts (Coming Soon)",
-    "📅 Tab 2 - Daily Summary Report",
-    "🔍 Tab 3 - Stock History & Forecast (Coming Soon)",
-    "📊 Tab 4 - Options Analysis (Coming Soon)",
-    "📡 Tab 5 - Signal Generator (Coming Soon)",
-    "🌐 Tab 6 - Global Exchanges (Coming Soon)",
-    "📊 Tab 7 - Advanced Indicators (Coming Soon)"
-]
-
-selected_tab = st.sidebar.radio("📁 Select Analysis Tab", tabs)
-
-# --- Route to Tab Logic ---
-if selected_tab == tabs[1]:  # Tab 2
-    show_summary_report()
-else:
-    st.info("🛠️ This tab is under development. Please check back soon.")
+# Call the corresponding function
+tabs[selected_tab].show()
