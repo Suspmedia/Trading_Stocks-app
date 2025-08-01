@@ -10,3 +10,4 @@ prophet
 bs4
 requests
 py_vollib
+beautifulsoup4
