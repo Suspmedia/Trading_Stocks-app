@@ -1,109 +1,84 @@
 import streamlit as st
 import pandas as pd
-import requests
-from bs4 import BeautifulSoup
+import datetime
 import yfinance as yf
-from datetime import datetime
 
-@st.cache_data
-def fetch_from_nse_html():
-    headers = {"User-Agent": "Mozilla/5.0"}
+def load_nse_bhavcopy_data():
+    today = datetime.date.today()
+    filename = f"cm{today.strftime('%d%b%Y').upper()}bhav.csv"
+    url = f"https://www1.nseindia.com/content/historical/EQUITIES/{today.strftime('%Y')}/{today.strftime('%b').upper()}/{filename}.zip"
     try:
-        session = requests.Session()
-        url = "https://www.nseindia.com/market-data/top-gainers-loosers"
-        response = session.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(response.content, "html.parser")
-        tables = soup.find_all("table")
-
-        gainers_df = pd.read_html(str(tables[0]))[0] if tables else pd.DataFrame()
-        losers_df = pd.read_html(str(tables[1]))[0] if len(tables) > 1 else pd.DataFrame()
-        return gainers_df, losers_df
-    except:
-        return None, None
-
-@st.cache_data
-def fetch_from_nse_csv():
-    date_str = datetime.now().strftime("%d%m%Y")
-    base_url = "https://www1.nseindia.com/content/nsccl/"
-    try:
-        gainers_url = f"{base_url}niftyGainers_{date_str}.csv"
-        losers_url = f"{base_url}niftyLosers_{date_str}.csv"
-        gainers_df = pd.read_csv(gainers_url)
-        losers_df = pd.read_csv(losers_url)
-        return gainers_df, losers_df
-    except:
-        return None, None
-
-@st.cache_data
-def fetch_all_nse_stocks():
-    try:
-        url = "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%20500"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers, timeout=10)
-        data = response.json()
-        records = data["data"]
-        df = pd.DataFrame(records)
+        df = pd.read_csv(url, compression='zip')
+        df = df[df['SERIES'] == 'EQ']
+        df = df[['SYMBOL', 'OPEN', 'HIGH', 'LOW', 'CLOSE', 'PREVCLOSE', 'TOTTRDQTY', 'TOTTRDVAL']]
+        df["PERCENT_CHANGE"] = ((df["CLOSE"] - df["PREVCLOSE"]) / df["PREVCLOSE"]) * 100
         return df
     except:
         return None
 
-@st.cache_data
-def fetch_from_yfinance():
+def load_from_yfinance():
     try:
-        nifty = yf.Ticker("^NSEI")
-        hist = nifty.history(period="2d", interval="1d").reset_index()
-        if len(hist) < 2:
-            return None, None
-        change = hist.iloc[1]['Close'] - hist.iloc[0]['Close']
-        percent_change = (change / hist.iloc[0]['Close']) * 100
-        df = pd.DataFrame([{
-            "Stock": "NIFTY 50",
-            "Previous Close": hist.iloc[0]['Close'],
-            "Current Close": hist.iloc[1]['Close'],
-            "Change": round(change, 2),
-            "Percent Change": f"{percent_change:.2f}%"
-        }])
-        return df, df
+        nifty_stocks = ['RELIANCE.NS', 'TCS.NS', 'INFY.NS', 'HDFCBANK.NS']  # Example: you can expand this list
+        data = []
+        for ticker in nifty_stocks:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="2d")
+            if len(hist) >= 2:
+                prev, last = hist.iloc[-2], hist.iloc[-1]
+                percent_change = ((last["Close"] - prev["Close"]) / prev["Close"]) * 100
+                data.append({
+                    "SYMBOL": ticker.replace('.NS', ''),
+                    "OPEN": last["Open"],
+                    "HIGH": last["High"],
+                    "LOW": last["Low"],
+                    "CLOSE": last["Close"],
+                    "PREVCLOSE": prev["Close"],
+                    "PERCENT_CHANGE": percent_change
+                })
+        return pd.DataFrame(data)
     except:
-        return None, None
+        return None
 
-def run():
-    st.header("📅 Daily Summary Report (Post-Market)")
+def process_uploaded_csv(uploaded_file):
+    try:
+        df = pd.read_csv(uploaded_file)
+        if "PERCENT_CHANGE" not in df.columns and "PREVCLOSE" in df.columns and "CLOSE" in df.columns:
+            df["PERCENT_CHANGE"] = ((df["CLOSE"] - df["PREVCLOSE"]) / df["PREVCLOSE"]) * 100
+        return df
+    except:
+        return None
 
-    source = st.selectbox("Select Data Source", ["From NSE HTML", "From NSE CSV", "From Yahoo Finance"])
+def show_summary_report():
+    st.title("📅 Daily Summary Report (Post-Market)")
+    
+    df = load_nse_bhavcopy_data()
+    
+    if df is None:
+        st.warning("⚠️ NSE Bhavcopy failed. Trying fallback (yfinance)...")
+        df = load_from_yfinance()
+    
+    if df is None:
+        st.warning("⚠️ yFinance also failed. You can upload a CSV file instead.")
+        uploaded_file = st.file_uploader("📁 Upload your Bhavcopy CSV file", type=['csv'])
+        if uploaded_file:
+            df = process_uploaded_csv(uploaded_file)
+    
+    if df is None:
+        st.error("❌ No valid data found.")
+        return
 
-    gainers, losers = None, None
-    all_stocks = None
+    tab1, tab2, tab3 = st.tabs(["🔼 Top 100 Gainers", "🔽 Top 100 Losers", "📊 All Stocks"])
 
-    if source == "From NSE HTML":
-        gainers, losers = fetch_from_nse_html()
-        all_stocks = fetch_all_nse_stocks()
-    elif source == "From NSE CSV":
-        gainers, losers = fetch_from_nse_csv()
-        all_stocks = fetch_all_nse_stocks()
-    elif source == "From Yahoo Finance":
-        gainers, losers = fetch_from_yfinance()
+    with tab1:
+        top_gainers = df.sort_values("PERCENT_CHANGE", ascending=False).head(100)
+        st.subheader("🔼 Top 100 Gainers")
+        st.dataframe(top_gainers.reset_index(drop=True), use_container_width=True)
 
-    tab_titles = ["📈 Top Gainers", "📉 Top Losers"]
-    if all_stocks is not None and not all_stocks.empty:
-        tab_titles.append("📊 All Stocks (Nifty 500)")
+    with tab2:
+        top_losers = df.sort_values("PERCENT_CHANGE", ascending=True).head(100)
+        st.subheader("🔽 Top 100 Losers")
+        st.dataframe(top_losers.reset_index(drop=True), use_container_width=True)
 
-    tabs = st.tabs(tab_titles)
-
-    if gainers is not None and not gainers.empty:
-        with tabs[0]:
-            st.dataframe(gainers, use_container_width=True)
-    else:
-        with tabs[0]:
-            st.warning("Top gainers data not available.")
-
-    if losers is not None and not losers.empty:
-        with tabs[1]:
-            st.dataframe(losers, use_container_width=True)
-    else:
-        with tabs[1]:
-            st.warning("Top losers data not available.")
-
-    if all_stocks is not None and not all_stocks.empty and len(tabs) > 2:
-        with tabs[2]:
-            st.dataframe(all_stocks, use_container_width=True)
+    with tab3:
+        st.subheader("📊 All Stocks (Sortable/Searchable)")
+        st.dataframe(df.sort_values("SYMBOL").reset_index(drop=True), use_container_width=True)
