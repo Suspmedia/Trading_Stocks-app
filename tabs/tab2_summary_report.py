@@ -1,114 +1,116 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
-from datetime import datetime
-import time
+import yfinance as yf
+import io
+
+DEFAULT_SYMBOLS = [
+    "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "ICICIBANK.NS",
+    "SBIN.NS", "LT.NS", "AXISBANK.NS", "KOTAKBANK.NS", "ITC.NS",
+    "BAJFINANCE.NS", "BHARTIARTL.NS", "MARUTI.NS", "WIPRO.NS", "HCLTECH.NS",
+    "ULTRACEMCO.NS", "ASIANPAINT.NS", "HINDUNILVR.NS", "POWERGRID.NS", "NTPC.NS"
+]
 
 @st.cache_data(show_spinner=False)
-def get_nifty500_symbols():
-    return pd.read_csv("https://archives.nseindia.com/content/indices/ind_nifty500list.csv")["Symbol"].apply(lambda x: x + ".NS").tolist()
-
-@st.cache_data(show_spinner=True)
 def fetch_data(symbols):
-    tickers = yf.Tickers(" ".join(symbols))
-    data = []
+    df = yf.download(
+        tickers=symbols,
+        period="2d",
+        interval="1d",
+        group_by="ticker",
+        threads=True,
+        progress=False
+    )
+    
+    rows = []
     for symbol in symbols:
         try:
-            ticker = tickers.tickers[symbol]
-            hist = ticker.history(period="2d", interval="1d")
-            if len(hist) < 2:
+            hist = df[symbol]
+            if hist.shape[0] < 2:
                 continue
             prev_close = hist['Close'].iloc[0]
-            latest = hist.iloc[-1]
+            latest = hist.iloc[1]
             pct_change = ((latest['Close'] - prev_close) / prev_close) * 100
-            info = ticker.info
-            pe = info.get("trailingPE", None)
-            hist_month = ticker.history(period="1mo")
-            sma20 = hist_month['Close'].rolling(20).mean().iloc[-1] if len(hist_month) >= 20 else None
-            delta = hist_month['Close'].diff()
-            gain = delta.where(delta > 0, 0)
-            loss = -delta.where(delta < 0, 0)
-            avg_gain = gain.rolling(14).mean().iloc[-1]
-            avg_loss = loss.rolling(14).mean().iloc[-1]
-            rs = avg_gain / avg_loss if avg_loss != 0 else 0
-            rsi = 100 - (100 / (1 + rs))
-
-            data.append({
-                "Symbol": symbol.replace(".NS", ""),
+            rsi = compute_rsi(hist['Close'].values)
+            sma20 = hist['Close'].rolling(20).mean().iloc[-1]
+            rows.append({
+                "Symbol": symbol,
                 "Close": latest['Close'],
-                "% Change": pct_change,
+                "% Change": round(pct_change, 2),
                 "Volume": latest['Volume'],
-                "P/E Ratio": pe,
-                "SMA 20": sma20,
-                "RSI": rsi
+                "RSI": round(rsi, 2) if rsi else None,
+                "SMA 20": round(sma20, 2) if pd.notna(sma20) else None
             })
         except Exception:
             continue
-    return pd.DataFrame(data)
+    df_final = pd.DataFrame(rows)
+    return df_final
+
+def compute_rsi(prices, period=14):
+    if len(prices) < period + 1:
+        return None
+    delta = pd.Series(prices).diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+    avg_gain = gain.rolling(window=period).mean().iloc[-1]
+    avg_loss = loss.rolling(window=period).mean().iloc[-1]
+    if avg_loss == 0:
+        return 100
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+@st.cache_data
+def convert_df(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name="Summary")
+    return output.getvalue()
 
 def show():
     st.header("📅 Daily Summary Report")
+    st.markdown("This section shows top gainers, losers, and volume leaders.")
 
-    st.markdown("### 🔍 Choose Data Source")
-    use_custom = st.checkbox("Upload your own stock list (CSV)", value=False)
-
-    if use_custom:
-        uploaded = st.file_uploader("Upload CSV with column 'Symbol'", type=["csv"])
-        if uploaded:
-            user_df = pd.read_csv(uploaded)
-            symbols = user_df['Symbol'].dropna().tolist()
-            symbols = [s if s.endswith(".NS") else s + ".NS" for s in symbols]
-        else:
-            st.warning("Please upload a valid CSV file.")
-            return
+    uploaded = st.file_uploader("Upload CSV of symbols", type=["csv"])
+    if uploaded:
+        uploaded_df = pd.read_csv(uploaded)
+        symbols = uploaded_df.iloc[:, 0].astype(str).tolist()
     else:
-        symbols = get_nifty500_symbols()
+        symbols = DEFAULT_SYMBOLS
 
-    st.markdown("### 📥 Fetching Data...")
     data = fetch_data(symbols)
     if data.empty:
-        st.error("❌ No data fetched.")
+        st.warning("No data fetched.")
         return
 
-    st.markdown("### 📊 Summary Filters")
-
-    # Add filters
-    min_rsi, max_rsi = st.slider("RSI Range", 0, 100, (30, 70))
-    min_pe, max_pe = st.slider("P/E Ratio Range", 0.0, 100.0, (0.0, 60.0))
+    st.sidebar.subheader("🔍 Filters")
+    min_volume = st.sidebar.slider("Minimum Volume", 0, int(data['Volume'].max()), 0)
+    rsi_range = st.sidebar.slider("RSI Range", 0, 100, (0, 100))
+    sma_filter = st.sidebar.checkbox("Show only stocks above SMA 20", value=False)
 
     filtered = data[
-        (data["RSI"].between(min_rsi, max_rsi)) &
-        (data["P/E Ratio"].between(min_pe, max_pe, inclusive="both"))
+        (data['Volume'] >= min_volume) &
+        (data['RSI'].between(rsi_range[0], rsi_range[1]))
     ]
+    if sma_filter:
+        filtered = filtered[filtered['Close'] > filtered['SMA 20']]
 
-    # Tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Gainers", "📉 Losers", "🔥 Volume Leaders", "📘 Fundamentals"])
+    tab1, tab2, tab3 = st.tabs(["📈 Top Gainers", "📉 Top Losers", "🔥 Volume Leaders"])
 
     with tab1:
-        st.subheader("Top 50 Gainers")
-        gainers = filtered.sort_values(by="% Change", ascending=False).head(50).reset_index(drop=True)
-        st.dataframe(gainers)
-    
+        gainers = filtered.sort_values(by="% Change", ascending=False).head(50)
+        st.dataframe(gainers.reset_index(drop=True), use_container_width=True)
+
     with tab2:
-        st.subheader("Top 50 Losers")
-        losers = filtered.sort_values(by="% Change", ascending=True).head(50).reset_index(drop=True)
-        st.dataframe(losers)
+        losers = filtered.sort_values(by="% Change", ascending=True).head(50)
+        st.dataframe(losers.reset_index(drop=True), use_container_width=True)
 
     with tab3:
-        st.subheader("Top 50 Volume Leaders")
-        volume = filtered.sort_values(by="Volume", ascending=False).head(50).reset_index(drop=True)
-        st.dataframe(volume)
-
-    with tab4:
-        st.subheader("Fundamental Overview (P/E, RSI, SMA)")
-        st.dataframe(filtered.sort_values(by="P/E Ratio", na_position="last").reset_index(drop=True))
-
-    # Excel Export
-    st.markdown("### 📤 Export Summary to Excel")
-    @st.cache_data
-    def convert_df(df):
-        return df.to_excel(index=False, engine='openpyxl')
+        vol_leaders = filtered.sort_values(by="Volume", ascending=False).head(50)
+        st.dataframe(vol_leaders.reset_index(drop=True), use_container_width=True)
 
     excel = convert_df(filtered)
-    st.download_button("📥 Download Excel", data=excel, file_name="summary_report.xlsx")
-
+    st.download_button(
+        "📥 Download Filtered Summary to Excel",
+        data=excel,
+        file_name="summary_report.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
