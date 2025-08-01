@@ -57,6 +57,7 @@ def calculate_rsi(series, period=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
+def show()
 def tab2_summary_report():
     st.header("📅 Daily Market Summary Report")
 
