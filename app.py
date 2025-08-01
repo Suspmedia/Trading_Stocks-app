@@ -22,8 +22,8 @@ tabs = {
     "📈 Indian Stocks": tab1_india_stocks,
     "📅 Daily Summary Report": tab2_summary_report,
     "🔍 Stock Forecast & History": tab3_historical_forecast,
-    "🧮 Option Analyzer": tab4_option_analyzer,
-    "🚦 Signal Generator": tab5_signal_generator,
+    "🧮 Option Analyzer": tab4_option_analysis,
+    "🚦 Signal Generator": tab5_signal_generation,
     "🌐 Global Market Report": tab6_global_markets,
     "⚙️ Advanced Indicators": tab7_advanced_metrics,
 }
