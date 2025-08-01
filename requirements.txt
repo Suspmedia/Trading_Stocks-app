@@ -11,3 +11,4 @@ bs4
 requests
 py_vollib
 beautifulsoup4
+altair
