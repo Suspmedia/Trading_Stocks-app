@@ -1,9 +1,9 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import plotly.graph_objects as go
+import string
 
-# Static NSE stock list (your preferred list)
+@st.cache_data
 def get_nse_stock_list():
     return {
         'ASIANPAINT': 'ASIANPAINT.NS', 'AXISBANK': 'AXISBANK.NS', 'BAJAJ-AUTO': 'BAJAJ-AUTO.NS',
@@ -22,65 +22,62 @@ def get_nse_stock_list():
     }
 
 def show():
-    st.header("📈 Indian Stock Line Chart with Volume")
+    st.header("📄 Indian Stock OHLC Data Viewer")
 
-    stock_dict = get_nse_stock_list()
-    selected_stock = st.selectbox("Select a Stock", list(stock_dict.keys()))
-    symbol = stock_dict[selected_stock]
+    all_stocks = get_nse_stock_list()
 
-    timeframe_options = {
-        "1 Hour": ("2d", "1h"),
-        "1 Day": ("5d", "1d"),
-        "1 Week": ("1mo", "1d"),
-        "1 Month": ("3mo", "1d")
+    # Stock filter
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        selected_letter = st.selectbox("Filter by alphabet", ['All'] + list(string.ascii_uppercase))
+
+    filtered_stocks = all_stocks if selected_letter == 'All' else {
+        k: v for k, v in all_stocks.items() if k.startswith(selected_letter)
     }
 
-    timeframe_label = st.selectbox("Select Timeframe", list(timeframe_options.keys()))
-    period, interval = timeframe_options[timeframe_label]
+    with col2:
+        selected_stock_name = st.selectbox("Select stock", list(filtered_stocks.keys()))
+
+    selected_symbol = filtered_stocks[selected_stock_name]
+
+    # Timeframe and interval
+    timeframe = st.selectbox("Select timeframe", ["5d", "14d", "21d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "max"])
+    interval = st.selectbox("Select interval", ["1h", "1d", "1wk", "1mo"])
+
+    # Optional indicators
+    show_sma = st.checkbox("Show SMA (Simple Moving Average)", value=True)
+    show_volume = st.checkbox("Show Volume", value=True)
+    show_rsi = st.checkbox("Show RSI", value=False)
 
     try:
-        df = yf.download(symbol, period=period, interval=interval, progress=False)
+        df = yf.download(selected_symbol, period=timeframe, interval=interval, progress=False)
+
         if df.empty:
             st.warning("⚠️ No data found.")
             return
 
-        df.dropna(inplace=True)
+        if show_sma:
+            df["SMA_10"] = df["Close"].rolling(window=10).mean()
+        if show_rsi:
+            delta = df["Close"].diff()
+            gain = delta.where(delta > 0, 0)
+            loss = -delta.where(delta < 0, 0)
+            avg_gain = gain.rolling(window=14).mean()
+            avg_loss = loss.rolling(window=14).mean()
+            rs = avg_gain / avg_loss
+            df["RSI"] = 100 - (100 / (1 + rs))
 
-        fig = go.Figure()
+        st.subheader(f"{selected_stock_name} ({selected_symbol}) OHLC Data")
+        st.dataframe(df.tail(100))
 
-        # Line chart for Close price
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df['Close'],
-            mode='lines',
-            name='Close Price',
-            line=dict(color='deepskyblue')
-        ))
-
-        # Volume as bar chart
-        fig.add_trace(go.Bar(
-            x=df.index, y=df['Volume'],
-            name='Volume',
-            yaxis='y2',
-            marker=dict(color='lightgray'),
-            opacity=0.4
-        ))
-
-        # Layout settings
-        fig.update_layout(
-            title=f"{selected_stock} - Line Chart with Volume",
-            xaxis_title='Date',
-            yaxis_title='Price (INR)',
-            yaxis2=dict(
-                title='Volume',
-                overlaying='y',
-                side='right',
-                showgrid=False
-            ),
-            template='plotly_white',
-            height=600
+        # Export option
+        csv = df.to_csv().encode('utf-8')
+        st.download_button(
+            label="⬇️ Download CSV",
+            data=csv,
+            file_name=f"{selected_symbol}_{interval}.csv",
+            mime='text/csv'
         )
-
-        st.plotly_chart(fig, use_container_width=True)
 
     except Exception as e:
         st.error(f"Error fetching data: {e}")
