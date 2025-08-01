@@ -4,7 +4,6 @@ import pandas as pd
 import plotly.graph_objs as go
 import string
 
-# Load full list of NSE stocks (can be extended)
 @st.cache_data
 def get_nse_stock_list():
     return {
@@ -21,8 +20,7 @@ def get_nse_stock_list():
         'TECHM': 'TECHM.NS', 'TITAN': 'TITAN.NS', 'ULTRACEMCO': 'ULTRACEMCO.NS', 'WIPRO': 'WIPRO.NS'
     }
 
-# Main function
-def show_stock_charts():
+def show():
     st.header("📈 Indian Stock Charts")
 
     all_stocks = get_nse_stock_list()
