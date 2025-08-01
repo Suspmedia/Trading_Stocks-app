@@ -2,15 +2,19 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import io
+import requests
+from bs4 import BeautifulSoup
 
-DEFAULT_SYMBOLS = [
-    "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "ICICIBANK.NS",
-    "SBIN.NS", "LT.NS", "AXISBANK.NS", "KOTAKBANK.NS", "ITC.NS",
-    "BAJFINANCE.NS", "BHARTIARTL.NS", "MARUTI.NS", "WIPRO.NS", "HCLTECH.NS",
-    "ULTRACEMCO.NS", "ASIANPAINT.NS", "HINDUNILVR.NS", "POWERGRID.NS", "NTPC.NS"
-]
+@st.cache_data
+def get_nifty_500_symbols():
+    try:
+        url = "https://www1.nseindia.com/content/indices/ind_nifty500list.csv"
+        df = pd.read_csv(url)
+        return [symbol + ".NS" for symbol in df['Symbol'].tolist()]
+    except Exception:
+        return []  # fallback handled later
 
-@st.cache_data(show_spinner=False)
+@st.cache_data
 def fetch_data(symbols):
     df = yf.download(
         tickers=symbols,
@@ -20,7 +24,7 @@ def fetch_data(symbols):
         threads=True,
         progress=False
     )
-    
+
     rows = []
     for symbol in symbols:
         try:
@@ -42,8 +46,7 @@ def fetch_data(symbols):
             })
         except Exception:
             continue
-    df_final = pd.DataFrame(rows)
-    return df_final
+    return pd.DataFrame(rows)
 
 def compute_rsi(prices, period=14):
     if len(prices) < period + 1:
@@ -66,21 +69,32 @@ def convert_df(df):
     return output.getvalue()
 
 def show():
-    st.header("📅 Daily Summary Report")
-    st.markdown("This section shows top gainers, losers, and volume leaders.")
+    st.header("📊 Daily Summary Report (NIFTY 500 or full NSE)")
+    st.markdown("Displays top 50 gainers, losers, and volume leaders with RSI, SMA, and Excel export.")
 
-    uploaded = st.file_uploader("Upload CSV of symbols", type=["csv"])
-    if uploaded:
-        uploaded_df = pd.read_csv(uploaded)
-        symbols = uploaded_df.iloc[:, 0].astype(str).tolist()
+    source = st.radio("📌 Select data source", ["Auto-load NIFTY 500", "Manual Upload NSE Equity List (CSV)"])
+
+    if source == "Manual Upload NSE Equity List (CSV)":
+        uploaded = st.file_uploader("Upload CSV with 'Symbol' column", type=["csv"])
+        if uploaded:
+            uploaded_df = pd.read_csv(uploaded)
+            symbols = [s + ".NS" for s in uploaded_df['Symbol'].astype(str)]
+        else:
+            st.warning("Please upload a CSV file.")
+            return
     else:
-        symbols = DEFAULT_SYMBOLS
+        symbols = get_nifty_500_symbols()
+        if not symbols:
+            st.warning("⚠️ Failed to load NIFTY 500. Try uploading CSV manually.")
+            return
 
+    st.info(f"📦 {len(symbols)} symbols loaded. Fetching data...")
     data = fetch_data(symbols)
     if data.empty:
         st.warning("No data fetched.")
         return
 
+    # Sidebar filters
     st.sidebar.subheader("🔍 Filters")
     min_volume = st.sidebar.slider("Minimum Volume", 0, int(data['Volume'].max()), 0)
     rsi_range = st.sidebar.slider("RSI Range", 0, 100, (0, 100))
