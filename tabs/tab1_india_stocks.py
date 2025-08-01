@@ -1,7 +1,7 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import plotly.graph_objs as go
+import plotly.graph_objects as go
 import string
 
 @st.cache_data
@@ -23,7 +23,7 @@ def get_nse_stock_list():
     }
 
 def show():
-    st.header("📊 Indian Stock OHLC Charts")
+    st.header("📊 Indian Stock Trend - Line Chart View")
 
     all_stocks = get_nse_stock_list()
 
@@ -32,48 +32,49 @@ def show():
     with col1:
         selected_letter = st.selectbox("Filter by alphabet", ['All'] + list(string.ascii_uppercase))
 
-    # Filter stocks by selected letter
-    if selected_letter == 'All':
-        filtered_stocks = all_stocks
-    else:
-        filtered_stocks = {k: v for k, v in all_stocks.items() if k.startswith(selected_letter)}
+    # Filter stocks
+    filtered_stocks = all_stocks if selected_letter == 'All' else {
+        k: v for k, v in all_stocks.items() if k.startswith(selected_letter)
+    }
 
     with col2:
         selected_stock_name = st.selectbox("Select a stock", list(filtered_stocks.keys()))
 
     selected_symbol = filtered_stocks[selected_stock_name]
 
+    # Timeframes
     timeframe = st.selectbox("Select timeframe", ["5d", "14d", "21d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "max"])
-    interval = st.selectbox("Select interval", ["5m", "15m", "30m", "1h", "1d", "1wk"])
+    interval = st.selectbox("Select interval", ["1m", "5m", "15m", "30m", "1h", "1d", "1wk", "1mo"])
 
     try:
         data = yf.download(selected_symbol, period=timeframe, interval=interval, progress=False)
+
         if data.empty:
             st.warning("⚠️ No data found for the selected stock.")
             return
 
         st.subheader(f"{selected_stock_name} ({selected_symbol})")
 
+        # Show raw data
         with st.expander("📄 View Raw OHLC Data"):
             st.dataframe(data.tail(50))
 
-        # OHLC Plot
+        # Plot line chart for closing price
         fig = go.Figure()
-        fig.add_trace(go.Ohlc(
+        fig.add_trace(go.Scatter(
             x=data.index,
-            open=data['Open'],
-            high=data['High'],
-            low=data['Low'],
-            close=data['Close'],
-            name='OHLC'
+            y=data['Close'],
+            mode='lines+markers',
+            name='Close Price',
+            line=dict(color='blue', width=2)
         ))
 
         fig.update_layout(
-            title=f"{selected_stock_name} - OHLC Chart",
+            title=f"{selected_stock_name} - Closing Price Trend",
             xaxis_title="Date",
             yaxis_title="Price (INR)",
-            xaxis_rangeslider_visible=False,
-            template="plotly_white"
+            template="plotly_white",
+            height=500
         )
 
         st.plotly_chart(fig, use_container_width=True)
