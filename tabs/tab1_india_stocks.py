@@ -1,16 +1,12 @@
-# tabs/tab1_india_stocks.py
-
 import streamlit as st
-import pandas as pd
 import yfinance as yf
-import altair as alt
-from datetime import datetime, timedelta
+import pandas as pd
+import plotly.graph_objs as go
+import string
 
-def show():
-    st.header("📈 Indian Stock Analyzer")
-
-    # Your exact custom stock list
-    stock_dict = {
+@st.cache_data
+def get_nse_stock_list():
+    return {
         'ASIANPAINT': 'ASIANPAINT.NS', 'AXISBANK': 'AXISBANK.NS', 'BAJAJ-AUTO': 'BAJAJ-AUTO.NS',
         'BAJFINANCE': 'BAJFINANCE.NS', 'BHARTIARTL': 'BHARTIARTL.NS', 'CIPLA': 'CIPLA.NS',
         'COALINDIA': 'COALINDIA.NS', 'DIVISLAB': 'DIVISLAB.NS', 'DRREDDY': 'DRREDDY.NS',
@@ -26,46 +22,61 @@ def show():
         'CANBK': 'CANBK.NS', 'UNIONBANK': 'UNIONBANK.NS', 'PNB': 'PNB.NS', 'FEDERALBNK': 'FEDERALBNK.NS',
     }
 
-    stock_names = list(stock_dict.keys())
-    selected_name = st.selectbox("🔍 Select a stock", stock_names)
-    selected_stock = stock_dict[selected_name]
+def show():
+    st.header("📊 Indian Stock OHLC Charts")
 
-    # Timeframe selector
-    timeframe = st.selectbox("🕒 Select timeframe", ["5 days", "14 days", "21 days"])
-    num_days = {"5 days": 5, "14 days": 14, "21 days": 21}[timeframe]
+    all_stocks = get_nse_stock_list()
 
-    end_date = datetime.today()
-    start_date = end_date - timedelta(days=num_days * 2)
+    # Alphabet filter
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        selected_letter = st.selectbox("Filter by alphabet", ['All'] + list(string.ascii_uppercase))
+
+    # Filter stocks by selected letter
+    if selected_letter == 'All':
+        filtered_stocks = all_stocks
+    else:
+        filtered_stocks = {k: v for k, v in all_stocks.items() if k.startswith(selected_letter)}
+
+    with col2:
+        selected_stock_name = st.selectbox("Select a stock", list(filtered_stocks.keys()))
+
+    selected_symbol = filtered_stocks[selected_stock_name]
+
+    timeframe = st.selectbox("Select timeframe", ["5d", "14d", "21d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "max"])
+    interval = st.selectbox("Select interval", ["5m", "15m", "30m", "1h", "1d", "1wk"])
 
     try:
-        df = yf.download(selected_stock, start=start_date, end=end_date, progress=False)
-        df.reset_index(inplace=True)
-        df = df[['Date', 'Open', 'High', 'Low', 'Close']]
-        df['Date'] = pd.to_datetime(df['Date'])
-        df = df.tail(num_days)
-        source = df.copy()
+        data = yf.download(selected_symbol, period=timeframe, interval=interval, progress=False)
+        if data.empty:
+            st.warning("⚠️ No data found for the selected stock.")
+            return
+
+        st.subheader(f"{selected_stock_name} ({selected_symbol})")
+
+        with st.expander("📄 View Raw OHLC Data"):
+            st.dataframe(data.tail(50))
+
+        # OHLC Plot
+        fig = go.Figure()
+        fig.add_trace(go.Ohlc(
+            x=data.index,
+            open=data['Open'],
+            high=data['High'],
+            low=data['Low'],
+            close=data['Close'],
+            name='OHLC'
+        ))
+
+        fig.update_layout(
+            title=f"{selected_stock_name} - OHLC Chart",
+            xaxis_title="Date",
+            yaxis_title="Price (INR)",
+            xaxis_rangeslider_visible=False,
+            template="plotly_white"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
     except Exception as e:
-        st.warning(f"⚠️ Failed to fetch data for {selected_stock}")
-        return
-
-    st.subheader(f"{selected_name} ({selected_stock}) OHLC Chart")
-
-    base = alt.Chart(source).encode(x='Date:T')
-
-    rule = base.mark_rule().encode(
-        y='Low:Q',
-        y2='High:Q',
-        color=alt.condition("datum.Open <= datum.Close", alt.value("green"), alt.value("red"))
-    )
-
-    bar = base.mark_bar().encode(
-        y='Open:Q',
-        y2='Close:Q',
-        color=alt.condition("datum.Open <= datum.Close", alt.value("green"), alt.value("red"))
-    )
-
-    ohlc_chart = (rule + bar).properties(width=800, height=400)
-    st.altair_chart(ohlc_chart, use_container_width=True)
-
-    with st.expander("📋 View OHLC Data"):
-        st.dataframe(df.set_index("Date"))
+        st.error(f"Error loading chart: {e}")
