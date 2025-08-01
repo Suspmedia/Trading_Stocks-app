@@ -1,45 +1,38 @@
 import streamlit as st
 import pandas as pd
-import requests
+from datetime import datetime
 
-def fetch_nse_data(url):
+@st.cache_data
+def load_eod_summary():
+    """Fetch EOD top gainers and losers CSVs from NSE"""
+    date_str = datetime.now().strftime("%d%m%Y")
+    base_url = "https://www1.nseindia.com/content/nsccl/"
+    
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            data = response.json()
-            return pd.DataFrame(data['data'])
-        else:
-            st.error("Failed to fetch data.")
-            return pd.DataFrame()
+        gainers_url = f"{base_url}niftyGainers_{date_str}.csv"
+        losers_url = f"{base_url}niftyLosers_{date_str}.csv"
+
+        gainers_df = pd.read_csv(gainers_url)
+        losers_df = pd.read_csv(losers_url)
+
+        return gainers_df, losers_df
     except Exception as e:
-        st.error(f"Error: {e}")
-        return pd.DataFrame()
+        return None, None
 
 def run():
-    st.header("📅 Daily Market Summary (NSE - Post Market)")
+    st.header("📅 Daily Summary Report (Post-Market)")
 
-    tabs = st.tabs(["Top Gainers", "Top Losers", "Most Active"])
+    gainers_df, losers_df = load_eod_summary()
 
-    with tabs[0]:
-        st.subheader("📈 Top Gainers")
-        url_gainers = "https://www.nseindia.com/api/live-analysis-variations?index=gainers"
-        gainers = fetch_nse_data(url_gainers)
-        if not gainers.empty:
-            st.dataframe(gainers[["symbol", "lastPrice", "pChange", "previousClose"]])
+    if gainers_df is not None and losers_df is not None:
+        tabs = st.tabs(["Top Gainers", "Top Losers"])
 
-    with tabs[1]:
-        st.subheader("📉 Top Losers")
-        url_losers = "https://www.nseindia.com/api/live-analysis-variations?index=losers"
-        losers = fetch_nse_data(url_losers)
-        if not losers.empty:
-            st.dataframe(losers[["symbol", "lastPrice", "pChange", "previousClose"]])
+        with tabs[0]:
+            st.subheader("📈 Top Gainers Today")
+            st.dataframe(gainers_df, use_container_width=True)
 
-    with tabs[2]:
-        st.subheader("🔥 Most Active by Volume")
-        url_volume = "https://www.nseindia.com/api/live-analysis-most-active?index=volume"
-        active = fetch_nse_data(url_volume)
-        if not active.empty:
-            st.dataframe(active[["symbol", "lastPrice", "tradedQuantity", "turnoverInLakhs"]])
+        with tabs[1]:
+            st.subheader("📉 Top Losers Today")
+            st.dataframe(losers_df, use_container_width=True)
+    else:
+        st.error("⚠️ Failed to fetch EOD data from NSE. Please try again later.")
